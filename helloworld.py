@@ -22,3 +22,8 @@ def how_much_money_do_i_have(money):
 print(how_much_money_do_i_have(100))
 
 print(how_much_money_do_i_have(200))
+
+def name_and_amount(name, amount):
+    return f"{name} has {amount} $"
+
+print(name_and_amount("Benoit", 100))
