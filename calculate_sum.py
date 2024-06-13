@@ -88,3 +88,21 @@ total_sum = calculate_sum(numbers_list)
 
 # Print the calculated sum with a descriptive message
 print("The sum of the numbers is:", total_sum)
+
+
+input_number1 = int(input("Please input a number: "))
+input_number2 = int(input("Please input another number: "))
+def sum_numbers(number1, number2):
+    return f"The addition of both numbers are {number1 + number2}"
+print(sum_numbers(input_number1,input_number2))
+ 
+def subtract_numbers(number1, number2):
+    if number1 < number2:
+        return "Sorry number 1 is smaller than number 2"
+    else:
+        return f"The substraction of both numbers are {number1 - number2}"
+print(subtract_numbers(input_number1,input_number2))
+ 
+def multiplication_numbers(number1, number2):
+    return f"The multiplication of both numbers are {number1*number2}"
+print(multiplication_numbers(input_number1,input_number2))
