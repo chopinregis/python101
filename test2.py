@@ -1,0 +1,2 @@
+def saluer():
+    print("Bonjour !")
