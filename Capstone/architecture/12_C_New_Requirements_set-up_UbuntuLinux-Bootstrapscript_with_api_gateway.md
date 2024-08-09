@@ -110,6 +110,10 @@ def calculate_estimated_waiting_time(queue_number):
     # Simple estimation: 15 minutes per person in queue
     return queue_number * 15
 
+@app.route('/check_session')
+def check_session():
+    return jsonify(dict(session))
+
 @app.route('/')
 def index():
     hospitals = ['Hospital A', 'Hospital B', 'Hospital C']
@@ -147,41 +151,28 @@ def submit():
     logging.debug("Submit route accessed")
     data = request.form.to_dict()
     logging.debug(f"Received form data: {data}")
-    required_fields = ['name', 'lastName', 'dob', 'hospital', 'symptoms', 'emergency_contact_name', 
-                       'emergency_contact_phone', 'payment_method', 'appointment_type', 'time_slot']
-    
-    # Check if all required fields are present
-    for field in required_fields:
-        if field not in data:
-            flash(f'Missing required field: {field}', 'error')
-            return redirect(url_for('form', hospital=data.get('hospital', '')))
-    
-    # Validate input
-    if not validate_date(data['dob']):
-        flash('Invalid date of birth format. Please use YYYY-MM-DD.', 'error')
-        return redirect(url_for('form', hospital=data['hospital']))
-    
-    if not validate_phone_number(data['emergency_contact_phone']):
-        flash('Invalid phone number format.', 'error')
-        return redirect(url_for('form', hospital=data['hospital']))
     
     try:
+        logging.debug("Attempting to get daily counter")
         queue_number = get_daily_counter()
+        logging.debug(f"Queue number assigned: {queue_number}")
         
-        # Check if queue is full
+        logging.debug("Checking if queue is full")
         if queue_number > 20:
+            logging.debug("Queue is full, redirecting to index")
             flash('We are full, please check back later.', 'error')
             return redirect(url_for('index'))
         
-        # Book the time slot
+        logging.debug("Attempting to book time slot")
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute("UPDATE time_slots SET booked = booked + 1 WHERE id = %s", (data['time_slot'],))
                 if cursor.rowcount == 0:
+                    logging.debug("Time slot no longer available")
                     flash('The selected time slot is no longer available. Please try again.', 'error')
                     return redirect(url_for('form', hospital=data['hospital']))
             
-            # Store patient data
+            logging.debug("Inserting patient data")
             with connection.cursor() as cursor:
                 sql = """INSERT INTO patients 
                          (name, last_name, dob, hospital, symptoms, queue_number, time_slot_id, status,
@@ -198,12 +189,12 @@ def submit():
             connection.commit()
         logging.debug(f"Patient data inserted successfully. Queue number: {queue_number}")
 
-        # Store queue number in session
+        logging.debug("Storing queue number in session")
         session['queue_number'] = queue_number
         session['hospital'] = data['hospital']
         
-        # Redirect to a new page showing the queue number
-        return redirect(url_for('queue_info'))
+        logging.debug("Redirecting to patients")
+        return redirect(url_for('patients'))
     
     except Exception as e:
         error_message = f"An unexpected error occurred: {e}"
@@ -213,6 +204,7 @@ def submit():
         logging.error(f"Exception args: {e.args}")
         flash(error_message, 'error')
     
+    logging.debug("Rendering form template")
     return render_template('form.html', hospital=data['hospital'])
 
 @app.route('/queue_info')
@@ -852,6 +844,35 @@ button:hover {
 }
 EOF
 
+# Create static directory and js subdirectory
+mkdir -p /home/ubuntu/hospital_queue/static/js
+
+# Create and populate script.js
+cat << EOF > /home/ubuntu/hospital_queue/static/js/script.js
+function checkAlternatives() {
+    fetch('/check_queues')
+        .then(response => response.json())
+        .then(data => {
+            let alternativesDiv = document.getElementById('alternatives');
+            alternativesDiv.innerHTML = '<h2>Alternative Hospitals:</h2>';
+            for (let hospital in data) {
+                alternativesDiv.innerHTML += `<p>${hospital}: ${data[hospital]} in queue</p>`;
+            }
+        });
+}
+
+// You can add more JavaScript functions here as needed
+EOF
+
+# Set correct permissions for script.js
+chmod 644 /home/ubuntu/hospital_queue/static/js/script.js
+
+# Ensure the ubuntu user owns the file
+chown ubuntu:ubuntu /home/ubuntu/hospital_queue/static/js/script.js
+
+# Log the creation of the file
+echo "script.js has been created and populated in /home/ubuntu/hospital_queue/static/js/"
+
 # Configure Nginx
 sudo tee /etc/nginx/sites-available/hospital_queue << EOF
 server {
@@ -863,6 +884,10 @@ server {
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
     }
+
+    location /static {
+        alias /home/ubuntu/hospital_queue/static;
+    }
 }
 EOF
 
@@ -873,6 +898,8 @@ if [ $? -ne 0 ]; then
     echo "Error occurred during Nginx configuration. Exiting."
     exit 1
 fi
+
+
 
 # Create systemd service for Gunicorn
 sudo tee /etc/systemd/system/hospital_queue.service << EOF
@@ -970,6 +997,13 @@ fi
 
 # Set correct permissions
 sudo chown -R ubuntu:ubuntu /home/ubuntu/hospital_queue
+sudo chmod -R 755 /home/ubuntu/hospital_queue/static
+sudo chown -R ubuntu:www-data /home/ubuntu/hospital_queue/static
+
+# Create log file with correct permissions
+sudo touch /home/ubuntu/hospital_queue/app.log
+sudo chown ubuntu:ubuntu /home/ubuntu/hospital_queue/app.log
+sudo chmod 666 /home/ubuntu/hospital_queue/app.log
 
 # Start and enable Gunicorn service
 sudo systemctl start hospital_queue
@@ -1017,6 +1051,9 @@ sudo systemctl enable hospital_queue
 if [ $? -ne 0 ]; then
     echo "Warning: An issue occurred while starting Gunicorn service, but continuing..." >&2
 fi
+
+# Enable the Nginx configuration
+sudo ln -sf /etc/nginx/sites-available/hospital_queue /etc/nginx/sites-enabled/
 
 # Final check and restart of Nginx
 sudo nginx -t && sudo systemctl restart nginx
